@@ -1,0 +1,40 @@
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+
+@Service
+public class SupportTicketProcessor extends TicketProcessor<SupportTicketDTO> {
+
+    @Autowired
+    private SupportTicketRepository supportTicketRepository;
+
+    @Override
+    protected void prepare(SupportTicketDTO ticketDTO, TicketEntity ticketEntity) {
+        System.out.println("Подготовка данных для заявки на поддержку: " + ticketDTO.getCustomerEmail());
+    }
+
+    @Override
+    protected void validate(SupportTicketDTO ticketDTO, TicketEntity ticketEntity) {
+        if (ticketDTO.getCustomerEmail() == null || ticketDTO.getCustomerEmail().isEmpty()) {
+            throw new IllegalArgumentException("Email клиента не может быть пустым");
+        }
+        System.out.println("Данные заявки на поддержку валидны");
+    }
+
+    @Override
+    protected void checkForDuplicates(SupportTicketDTO ticketDTO) {
+        // Пример проверки на дублирование по email
+        if (supportTicketRepository.existsByCustomerEmail(ticketDTO.getCustomerEmail())) {
+            throw new IllegalArgumentException("Заявка с таким email уже существует");
+        }
+    }
+
+    @Override
+    protected void saveAdditionalData(SupportTicketDTO ticketDTO, TicketEntity savedTicket) {
+        SupportTicketEntity supportTicketEntity = new SupportTicketEntity();
+        supportTicketEntity.setCustomerEmail(ticketDTO.getCustomerEmail());
+        supportTicketEntity.setTicket(savedTicket); // Ссылка на основную заявку
+
+        supportTicketRepository.save(supportTicketEntity);
+        System.out.println("Дополнительные данные для заявки на поддержку сохранены: " + supportTicketEntity.getId());
+    }
+}
