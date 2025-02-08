@@ -1,0 +1,16 @@
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.web.bind.annotation.*;
+
+@RestController
+@RequestMapping("/api/tickets")
+public class TicketController {
+
+    @Autowired
+    private TicketService ticketService;
+
+    @PostMapping
+    public String createTicket(@RequestBody TicketDTO ticketDTO) {
+        ticketService.processTicket(ticketDTO);
+        return "Заявка успешно обработана";
+    }
+}
