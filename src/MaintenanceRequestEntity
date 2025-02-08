@@ -1,0 +1,40 @@
+import jakarta.persistence.*;
+
+@Entity
+public class MaintenanceRequestEntity {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    private String equipmentId;
+
+    @ManyToOne
+    @JoinColumn(name = "ticket_id")
+    private TicketEntity ticket;
+
+    // Геттеры и сеттеры
+    public Long getId() {
+        return id;
+    }
+
+    public void setId(Long id) {
+        this.id = id;
+    }
+
+    public String getEquipmentId() {
+        return equipmentId;
+    }
+
+    public void setEquipmentId(String equipmentId) {
+        this.equipmentId = equipmentId;
+    }
+
+    public TicketEntity getTicket() {
+        return ticket;
+    }
+
+    public void setTicket(TicketEntity ticket) {
+        this.ticket = ticket;
+    }
+}
