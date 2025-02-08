@@ -1,0 +1,52 @@
+import org.springframework.scheduling.annotation.Async;
+import org.springframework.transaction.annotation.Transactional;
+
+public abstract class TicketProcessor<T extends TicketDTO> {
+
+    @Transactional
+    public void process(T ticketDTO, TicketEntity savedTicket) {
+        // Подготовка и валидация данных
+        prepareAndValidate(ticketDTO, savedTicket);
+
+        // Сохранение дополнительных данных (после сохранения заявки)
+        saveAdditionalData(ticketDTO, savedTicket);
+
+        // Асинхронная нотификация
+        notifyOtherServices(ticketDTO, savedTicket);
+    }
+
+    // Метод для подготовки и валидации данных
+    protected void prepareAndValidate(T ticketDTO, TicketEntity ticketEntity) {
+        // Предзаполнение обязательных полей сущности
+        ticketEntity.setType(ticketDTO.getTemplate());
+        ticketEntity.setTitle(ticketDTO.getTitle());
+        ticketEntity.setDescription(ticketDTO.getDescription());
+
+        // Проверка на дублирование данных
+        checkForDuplicates(ticketDTO);
+
+        // Вызов подготовки и валидации в наследниках
+        prepare(ticketDTO, ticketEntity);
+        validate(ticketDTO, ticketEntity);
+    }
+
+    // Абстрактные методы для подготовки, валидации и сохранения дополнительных данных
+    protected abstract void prepare(T ticketDTO, TicketEntity ticketEntity);
+    protected abstract void validate(T ticketDTO, TicketEntity ticketEntity);
+    protected abstract void saveAdditionalData(T ticketDTO, TicketEntity savedTicket);
+
+    // Метод для проверки на дублирование данных
+    protected abstract void checkForDuplicates(T ticketDTO);
+
+    // Асинхронный метод для нотификации
+    @Async
+    protected void notifyOtherServices(T ticketDTO, TicketEntity savedTicket) {
+        System.out.println("Асинхронная нотификация для заявки: " + savedTicket.getId());
+        try {
+            Thread.sleep(3000); // Имитация долгой операции
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        System.out.println("Нотификация завершена для заявки: " + savedTicket.getId());
+    }
+}
