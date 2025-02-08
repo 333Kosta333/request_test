@@ -1,0 +1,40 @@
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+
+@Service
+public class MaintenanceRequestProcessor extends TicketProcessor<MaintenanceRequestDTO> {
+
+    @Autowired
+    private MaintenanceRequestRepository maintenanceRequestRepository;
+
+    @Override
+    protected void prepare(MaintenanceRequestDTO ticketDTO, TicketEntity ticketEntity) {
+        System.out.println("Подготовка данных для заявки на техническое обслуживание: " + ticketDTO.getEquipmentId());
+    }
+
+    @Override
+    protected void validate(MaintenanceRequestDTO ticketDTO, TicketEntity ticketEntity) {
+        if (ticketDTO.getEquipmentId() == null || ticketDTO.getEquipmentId().isEmpty()) {
+            throw new IllegalArgumentException("ID оборудования не может быть пустым");
+        }
+        System.out.println("Данные заявки на техническое обслуживание валидны");
+    }
+
+    @Override
+    protected void checkForDuplicates(MaintenanceRequestDTO ticketDTO) {
+        // Пример проверки на дублирование по equipmentId
+        if (maintenanceRequestRepository.existsByEquipmentId(ticketDTO.getEquipmentId())) {
+            throw new IllegalArgumentException("Заявка с таким ID оборудования уже существует");
+        }
+    }
+
+    @Override
+    protected void saveAdditionalData(MaintenanceRequestDTO ticketDTO, TicketEntity savedTicket) {
+        MaintenanceRequestEntity maintenanceRequestEntity = new MaintenanceRequestEntity();
+        maintenanceRequestEntity.setEquipmentId(ticketDTO.getEquipmentId());
+        maintenanceRequestEntity.setTicket(savedTicket); // Ссылка на основную заявку
+
+        maintenanceRequestRepository.save(maintenanceRequestEntity);
+        System.out.println("Дополнительные данные для заявки на техническое обслуживание сохранены: " + maintenanceRequestEntity.getId());
+    }
+}
