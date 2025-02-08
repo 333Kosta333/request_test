@@ -1,0 +1,36 @@
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.util.Map;
+
+@Service
+public class TicketService {
+
+    @Autowired
+    private TicketRepository ticketRepository;
+
+    @Autowired
+    private Map<String, TicketProcessor<?>> ticketProcessors;
+
+    @Transactional
+    public void processTicket(TicketDTO ticketDTO) {
+        // Создаем сущность заявки
+        TicketEntity ticketEntity = new TicketEntity();
+
+        // Выбираем процессор на основе типа заявки
+        String template = ticketDTO.getTemplate();
+        TicketProcessor<?> processor = ticketProcessors.get(template);
+
+        if (processor == null) {
+            throw new IllegalArgumentException("Неизвестный тип заявки: " + template);
+        }
+
+        // Подготовка, валидация и сохранение заявки
+        processor.prepareAndValidate(ticketDTO, ticketEntity);
+        ticketRepository.save(ticketEntity);
+
+        // Вызов процессора для обработки дополнительных данных
+        processor.process(ticketDTO, ticketEntity);
+    }
+}
