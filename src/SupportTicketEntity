@@ -1,0 +1,40 @@
+import jakarta.persistence.*;
+
+@Entity
+public class SupportTicketEntity {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    private String customerEmail;
+
+    @ManyToOne
+    @JoinColumn(name = "ticket_id")
+    private TicketEntity ticket;
+
+    // Геттеры и сеттеры
+    public Long getId() {
+        return id;
+    }
+
+    public void setId(Long id) {
+        this.id = id;
+    }
+
+    public String getCustomerEmail() {
+        return customerEmail;
+    }
+
+    public void setCustomerEmail(String customerEmail) {
+        this.customerEmail = customerEmail;
+    }
+
+    public TicketEntity getTicket() {
+        return ticket;
+    }
+
+    public void setTicket(TicketEntity ticket) {
+        this.ticket = ticket;
+    }
+}
