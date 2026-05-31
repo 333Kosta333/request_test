@@ -1,0 +1,206 @@
+# План разработки: Периодическое создание заявок по шаблонам
+
+## 1. Общее описание
+
+### 1.1. Назначение
+Система должна обеспечивать автоматическое (фоновое) создание заявок на выполнение услуг на основе заранее определённых шаблонов, с возможностью настройки интервала повторения. Должна быть обеспечена защита от дублирования заявок при работе нескольких инстансов сервиса в микросервисной архитектуре.
+
+### 1.2. Стек технологий
+- Java 21
+- Spring Boot 3.5
+- PostgreSQL
+- JPA / JDBC
+
+---
+
+## 2. Сущности и модели данных
+
+### 2.1. `Template`
+Хранит шаблоны заявок.
+
+| Поле | Тип | Описание |
+|------|-----|----------|
+| id | Long | Уникальный идентификатор |
+| name | String | Название шаблона |
+| serviceType | String | Тип услуги |
+| templateData | Jsonb | Данные шаблона (JSON) |
+| intervalSeconds | Integer | Интервал в секундах между выполнениями |
+| lastExecutionTime | Instant | Время последнего выполнения |
+| isActive | Boolean | Активен ли шаблон |
+
+### 2.2. `ScheduledTaskLock`
+Таблица для блокировки выполнения шаблона через статусы.
+
+| Поле | Тип | Описание |
+|------|-----|----------|
+| templateId | Long | ID шаблона (уникальный ключ) |
+| status | String | Статус выполнения: `PENDING`, `IN_PROGRESS`, `FAILED`, `COMPLETED` |
+| lockToken | String | Уникальный токен блокировки |
+| createdAt | Instant | Время создания записи |
+| updatedAt | Instant | Время обновления статуса |
+| expiresAt | Instant | Время, после которого задача считается просроченной |
+
+### 2.3. `TaskExecutionResult`
+Таблица для хранения результатов выполнения задач.
+
+| Поле | Тип | Описание |
+|------|-----|----------|
+| id | Long | Уникальный идентификатор |
+| templateId | Long | ID шаблона, к которому относится результат |
+| executionTime | Instant | Время выполнения |
+| status | String | Статус: `SUCCESS`, `ERROR` |
+| responsePayload | Text | Ответ от API (JSON или текст) |
+| errorMessage | Text | Сообщение об ошибке, если была |
+| createdAt | Instant | Время создания записи |
+
+---
+
+## 3. Компоненты системы
+
+### 3.1. `TemplateRepository`
+JpaRepository для доступа к сущности `Template`.
+
+### 3.2. `LockRepository`
+JpaRepository для доступа к сущности `ScheduledTaskLock`.
+
+### 3.3. `TaskExecutionResultRepository`
+JpaRepository для доступа к сущности `TaskExecutionResult`.
+
+### 3.4. `LockManager`
+Компонент, отвечающий за захват и освобождение блокировок на уровне БД.
+
+#### Методы:
+- `acquireLock(Long templateId)` → LockRecord (или null, если не удалось)
+- `updateStatus(Long templateId, String status)`
+- `releaseLock(Long templateId)`
+- `cleanupExpiredLocks(Duration timeout)`
+
+### 3.5. `TaskExecutionResultService`
+Компонент, сохраняющий результаты выполнения задач.
+
+#### Методы:
+- `saveSuccessResult(Long templateId, Object response)`
+- `saveErrorResult(Long templateId, Exception ex)`
+
+### 3.6. `TemplateProcessor`
+Компонент, обрабатывающий шаблоны и вызывающий создание заявок.
+
+#### Методы:
+- `processTemplates()`
+- `createRequestFromTemplate(Template template)`
+
+### 3.7. `RequestCreationService`
+Сервис, вызываемый для создания заявки по шаблону.
+
+### 3.8. `SchedulerService`
+Компонент, управляющий периодическими задачами.
+
+#### Методы:
+- `scheduleProcessing()`
+- `cleanupStaleLocks()`
+
+---
+
+## 4. Алгоритм работы
+
+### 4.1. Запуск фоновой задачи
+- Используется `@Scheduled` с фиксированным интервалом (например, 1 минута).
+- Метод `SchedulerService.scheduleProcessing()` вызывается регулярно.
+
+### 4.2. Очистка просроченных блокировок
+- Вызывается `LockManager.cleanupExpiredLocks(Duration.ofMinutes(20))`.
+- Сброс статуса `IN_PROGRESS` на `PENDING`, если `expiresAt < now()`.
+
+### 4.3. Обработка шаблонов
+1. Загрузить все активные шаблоны, у которых `lastExecutionTime + intervalSeconds < now()`.
+2. Для каждого шаблона:
+   - Попытаться захватить блокировку через `LockManager.acquireLock(templateId)`.
+   - Если успешно (статус `PENDING` изменён на `IN_PROGRESS`):
+     - Вызвать `RequestCreationService.createRequestFromTemplate(...)`.
+     - В случае успеха:
+       - Обновить `lastExecutionTime` в шаблоне.
+       - Обновить статус блокировки на `COMPLETED`.
+       - Сохранить результат в `TaskExecutionResultService.saveSuccessResult(...)`.
+     - В случае ошибки:
+       - Обновить статус блокировки на `FAILED`.
+       - Сохранить ошибку в `TaskExecutionResultService.saveErrorResult(...)`.
+   - Если не удалось захватить — пропустить (уже обрабатывается другим инстансом или статус не `PENDING`).
+
+### 4.4. Обработка ошибок
+- Если во время обработки шаблона произошла ошибка:
+  - Обновить статус блокировки на `FAILED`.
+  - Залогировать ошибку.
+  - При необходимости — деактивировать шаблон.
+
+---
+
+## 5. SQL скрипты
+
+### 5.1. Таблица `templates`
+```sql
+CREATE TABLE templates (
+    id BIGSERIAL PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    service_type VARCHAR(255),
+    template_data JSONB,
+    interval_seconds INTEGER DEFAULT 3600,
+    last_execution_time TIMESTAMPTZ,
+    is_active BOOLEAN DEFAULT TRUE
+);
+
+## 5.2 Таблица scheduled_task_locks
+sql
+CREATE TABLE scheduled_task_locks (
+    template_id BIGINT PRIMARY KEY REFERENCES templates(id) ON DELETE CASCADE,
+    status VARCHAR(50) NOT NULL DEFAULT 'PENDING',
+    lock_token VARCHAR(255) NOT NULL UNIQUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    expires_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE INDEX idx_scheduled_task_locks_status ON scheduled_task_locks(status);
+CREATE INDEX idx_scheduled_task_locks_expires ON scheduled_task_locks(expires_at);
+
+## 5.3. Таблица task_execution_results
+sql
+CREATE TABLE task_execution_results (
+    id BIGSERIAL PRIMARY KEY,
+    template_id BIGINT NOT NULL REFERENCES templates(id) ON DELETE CASCADE,
+    execution_time TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    status VARCHAR(20) NOT NULL,
+    response_payload TEXT,
+    error_message TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_task_execution_results_template_id ON task_execution_results(template_id);
+CREATE INDEX idx_task_execution_results_status ON task_execution_results(status);
+CREATE INDEX idx_task_execution_results_created_at ON task_execution_results(created_at);
+
+## 6. Безопасность и отказоустойчивость
+Блокировка реализована через уникальный ключ template_id и ограничение на status = 'PENDING'.
+Блокировка автоматически истекает по времени expires_at.
+Повторный захват возможен, если статус PENDING или задача просрочена.
+Результаты выполнения сохраняются для аудита и отладки.
+
+## 7. Логирование и мониторинг
+Все попытки захвата блокировок логируются.
+Факты создания заявок логируются.
+Ошибки обрабатываются и логируются.
+Метрики: количество попыток, успехов, ошибок, просроченных задач.
+Хранение всех результатов выполнения задач.
+
+## 8. Тестирование
+Unit-тесты для LockManager, TemplateProcessor, TaskExecutionResultService.
+Интеграционные тесты с базой данных.
+Тесты на конкурентный доступ к шаблонам.
+Тесты на восстановление после просроченных задач.
+Тесты на сохранение успешных и ошибочных результатов.
+
+## 9. Дополнительные возможности (по желанию)
+Поддержка CRON-выражений для расписания.
+Веб-интерфейс для управления шаблонами.
+История выполнения шаблонов.
+Возможность ручного перезапуска просроченных задач.
+Возможность просмотра истории выполнения и ошибок.
