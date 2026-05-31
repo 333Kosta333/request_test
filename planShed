@@ -15,8 +15,8 @@
 
 ## 2. Сущности и модели данных
 
-### 2.1. `Template`
-Хранит шаблоны заявок.
+### 2.1. `AutoClaimTemplate`
+Хранит шаблоны заявок (генератор заявок).
 
 | Поле | Тип | Описание |
 |------|-----|----------|
@@ -28,8 +28,8 @@
 | lastExecutionTime | Instant | Время последнего выполнения |
 | isActive | Boolean | Активен ли шаблон |
 
-### 2.2. `ScheduledTaskLock`
-Таблица для блокировки выполнения шаблона через статусы.
+### 2.2. `AutoClaimTaskLock`
+Таблица для блокировки выполнения задач генерации заявок.
 
 | Поле | Тип | Описание |
 |------|-----|----------|
@@ -40,8 +40,8 @@
 | updatedAt | Instant | Время обновления статуса |
 | expiresAt | Instant | Время, после которого задача считается просроченной |
 
-### 2.3. `TaskExecutionResult`
-Таблица для хранения результатов выполнения задач.
+### 2.3. `AutoClaimExecutionLog`
+Таблица для хранения результатов выполнения задач генерации заявок.
 
 | Поле | Тип | Описание |
 |------|-----|----------|
@@ -57,16 +57,16 @@
 
 ## 3. Компоненты системы
 
-### 3.1. `TemplateRepository`
-JpaRepository для доступа к сущности `Template`.
+### 3.1. `AutoClaimTemplateRepository`
+JpaRepository для доступа к сущности `AutoClaimTemplate`.
 
-### 3.2. `LockRepository`
-JpaRepository для доступа к сущности `ScheduledTaskLock`.
+### 3.2. `AutoClaimTaskLockRepository`
+JpaRepository для доступа к сущности `AutoClaimTaskLock`.
 
-### 3.3. `TaskExecutionResultRepository`
-JpaRepository для доступа к сущности `TaskExecutionResult`.
+### 3.3. `AutoClaimExecutionLogRepository`
+JpaRepository для доступа к сущности `AutoClaimExecutionLog`.
 
-### 3.4. `LockManager`
+### 3.4. `AutoClaimLockManager`
 Компонент, отвечающий за захват и освобождение блокировок на уровне БД.
 
 #### Методы:
@@ -75,14 +75,14 @@ JpaRepository для доступа к сущности `TaskExecutionResult`.
 - `releaseLock(Long templateId)`
 - `cleanupExpiredLocks(Duration timeout)`
 
-### 3.5. `TaskExecutionResultService`
+### 3.5. `AutoClaimExecutionLogService`
 Компонент, сохраняющий результаты выполнения задач.
 
 #### Методы:
 - `saveSuccessResult(Long templateId, Object response)`
 - `saveErrorResult(Long templateId, Exception ex)`
 
-### 3.6. `TemplateProcessor`
+### 3.6. `AutoClaimProcessor`
 Компонент, обрабатывающий шаблоны и вызывающий создание заявок.
 
 #### Методы:
@@ -92,8 +92,8 @@ JpaRepository для доступа к сущности `TaskExecutionResult`.
 ### 3.7. `RequestCreationService`
 Сервис, вызываемый для создания заявки по шаблону.
 
-### 3.8. `SchedulerService`
-Компонент, управляющий периодическими задачами.
+### 3.8. `AutoClaimSchedulerService`
+Компонент, управляющий периодическими задачами генерации заявок.
 
 #### Методы:
 - `scheduleProcessing()`
@@ -105,25 +105,25 @@ JpaRepository для доступа к сущности `TaskExecutionResult`.
 
 ### 4.1. Запуск фоновой задачи
 - Используется `@Scheduled` с фиксированным интервалом (например, 1 минута).
-- Метод `SchedulerService.scheduleProcessing()` вызывается регулярно.
+- Метод `AutoClaimSchedulerService.scheduleProcessing()` вызывается регулярно.
 
 ### 4.2. Очистка просроченных блокировок
-- Вызывается `LockManager.cleanupExpiredLocks(Duration.ofMinutes(20))`.
+- Вызывается `AutoClaimLockManager.cleanupExpiredLocks(Duration.ofMinutes(20))`.
 - Сброс статуса `IN_PROGRESS` на `PENDING`, если `expiresAt < now()`.
 
 ### 4.3. Обработка шаблонов
 1. Загрузить все активные шаблоны, у которых `lastExecutionTime + intervalSeconds < now()`.
 2. Для каждого шаблона:
-   - Попытаться захватить блокировку через `LockManager.acquireLock(templateId)`.
+   - Попытаться захватить блокировку через `AutoClaimLockManager.acquireLock(templateId)`.
    - Если успешно (статус `PENDING` изменён на `IN_PROGRESS`):
      - Вызвать `RequestCreationService.createRequestFromTemplate(...)`.
      - В случае успеха:
        - Обновить `lastExecutionTime` в шаблоне.
        - Обновить статус блокировки на `COMPLETED`.
-       - Сохранить результат в `TaskExecutionResultService.saveSuccessResult(...)`.
+       - Сохранить результат в `AutoClaimExecutionLogService.saveSuccessResult(...)`.
      - В случае ошибки:
        - Обновить статус блокировки на `FAILED`.
-       - Сохранить ошибку в `TaskExecutionResultService.saveErrorResult(...)`.
+       - Сохранить ошибку в `AutoClaimExecutionLogService.saveErrorResult(...)`.
    - Если не удалось захватить — пропустить (уже обрабатывается другим инстансом или статус не `PENDING`).
 
 ### 4.4. Обработка ошибок
@@ -136,9 +136,9 @@ JpaRepository для доступа к сущности `TaskExecutionResult`.
 
 ## 5. SQL скрипты
 
-### 5.1. Таблица `templates`
-```sql
-CREATE TABLE templates (
+### 5.1. Таблица `auto_claim_templates`
+sql
+CREATE TABLE auto_claim_templates (
     id BIGSERIAL PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
     service_type VARCHAR(255),
@@ -148,10 +148,10 @@ CREATE TABLE templates (
     is_active BOOLEAN DEFAULT TRUE
 );
 
-## 5.2 Таблица scheduled_task_locks
+## 5.2 Таблица auto_claim_task_locks
 sql
-CREATE TABLE scheduled_task_locks (
-    template_id BIGINT PRIMARY KEY REFERENCES templates(id) ON DELETE CASCADE,
+CREATE TABLE auto_claim_task_locks (
+    template_id BIGINT PRIMARY KEY REFERENCES auto_claim_templates(id) ON DELETE CASCADE,
     status VARCHAR(50) NOT NULL DEFAULT 'PENDING',
     lock_token VARCHAR(255) NOT NULL UNIQUE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -159,14 +159,14 @@ CREATE TABLE scheduled_task_locks (
     expires_at TIMESTAMPTZ NOT NULL
 );
 
-CREATE INDEX idx_scheduled_task_locks_status ON scheduled_task_locks(status);
-CREATE INDEX idx_scheduled_task_locks_expires ON scheduled_task_locks(expires_at);
+CREATE INDEX idx_auto_claim_task_locks_status ON auto_claim_task_locks(status);
+CREATE INDEX idx_auto_claim_task_locks_expires ON auto_claim_task_locks(expires_at);
 
-## 5.3. Таблица task_execution_results
+## 5.3. Таблица auto_claim_execution_logs
 sql
-CREATE TABLE task_execution_results (
+CREATE TABLE auto_claim_execution_logs (
     id BIGSERIAL PRIMARY KEY,
-    template_id BIGINT NOT NULL REFERENCES templates(id) ON DELETE CASCADE,
+    template_id BIGINT NOT NULL REFERENCES auto_claim_templates(id) ON DELETE CASCADE,
     execution_time TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     status VARCHAR(20) NOT NULL,
     response_payload TEXT,
@@ -174,9 +174,9 @@ CREATE TABLE task_execution_results (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_task_execution_results_template_id ON task_execution_results(template_id);
-CREATE INDEX idx_task_execution_results_status ON task_execution_results(status);
-CREATE INDEX idx_task_execution_results_created_at ON task_execution_results(created_at);
+CREATE INDEX idx_auto_claim_execution_logs_template_id ON auto_claim_execution_logs(template_id);
+CREATE INDEX idx_auto_claim_execution_logs_status ON auto_claim_execution_logs(status);
+CREATE INDEX idx_auto_claim_execution_logs_created_at ON auto_claim_execution_logs(created_at);
 
 ## 6. Безопасность и отказоустойчивость
 Блокировка реализована через уникальный ключ template_id и ограничение на status = 'PENDING'.
@@ -192,7 +192,7 @@ CREATE INDEX idx_task_execution_results_created_at ON task_execution_results(cre
 Хранение всех результатов выполнения задач.
 
 ## 8. Тестирование
-Unit-тесты для LockManager, TemplateProcessor, TaskExecutionResultService.
+Unit-тесты для AutoClaimLockManager, AutoClaimProcessor, AutoClaimExecutionLogService.
 Интеграционные тесты с базой данных.
 Тесты на конкурентный доступ к шаблонам.
 Тесты на восстановление после просроченных задач.
